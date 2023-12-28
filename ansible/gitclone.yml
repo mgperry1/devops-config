@@ -1,0 +1,87 @@
+---
+- name: Clone Repo
+  hosts: autocfgpromhost
+  gather_facts: false
+  gather_subset: '!all'
+  vars_files:
+  - installvars.yml
+  vars:
+   api_code_repo: 'https://{{GITPAT}}@github.com/gsk-tech/quickapi.git'
+   api_file_base: "/app/repos/"
+   install_group: gsk_it
+   install_user: mgp17171
+   mlmodel: "awx-app-v2"
+   mltype: "SARIMAX"
+   mltitle: "Capacity Forcast"
+   modelinputtype: "blob"
+   modelinput: "input/awx-app.csv"
+   modelkey: "Space GB"
+
+  tasks:
+  - name: create directory
+    file:
+      mode: 0777
+      path: "{{ api_file_base }}"
+      group: "{{ install_group }}"
+      owner: "{{ install_user }}"
+      state: directory
+    become: true
+    ignore_errors: Yes  
+
+  - name: remove directory
+    file:
+      path: "{{ api_file_base }}/automation-cfg"
+      state: absent
+    tags: gitcheckout   
+    become: true
+    ignore_errors: Yes   
+
+
+  - name: Run shell for git clone
+    shell: "git clone {{ api_code_repo }}"
+    args:
+      chdir: "{{ api_file_base }}"
+    environment:
+        TMPDIR: "~/tmp"  
+    register: rungit 
+    tags: gitcheckout
+
+
+  # - name: Git checkout
+  #   environment:
+  #       TMPDIR: "~/tmp"
+  #   git:
+  #     repo: "{{ api_code_repo }}/automation-cfg"
+  #     dest: "{{ api_file_base }}"
+  #     force: yes
+  #   register: gitresults
+  #   ignore_errors: yes
+  #   tags: gitcheckout
+
+  - name: chmod directory
+    file:
+      mode: u=rwX,g=rwX,o=rwX
+      path: "{{ api_file_base }}/automation-cfg"
+      recurse: yes
+    become: true  
+    tags: gitcheckout
+
+  - name: parse directory
+    find:
+      path: "{{ api_file_base }}"
+      patterns: '*.sh'
+      recurse: yes
+    register: list_of_files
+    tags: gitcheckout
+
+  - debug:
+      var: item.path
+    with_items: "{{ list_of_files.files }}"
+    tags: gitcheckout
+
+  - name: change permissions
+    file:
+      path: "{{ item.path }}"
+      mode: a+x
+    with_items: "{{ list_of_files.files }}"
+    tags: gitcheckout

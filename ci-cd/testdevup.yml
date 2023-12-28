@@ -1,0 +1,30 @@
+---
+- name: Build and deploy SIT API
+  hosts: apidev
+  vars_files:
+  - installvars.yml
+  - sitapidev_clear.yml
+  vars:
+   api_code_repo: 'https://{{GITPAT}}@mygithub.gsk.com/gsk-tech/snoweventlogger.git'
+   api_file_base: "/app/ci-cd/snoweventlogger"
+   install_group: gsk_it
+   install_user: mgp17171
+  tasks:
+
+  - name: REST API Check Status
+    uri:
+      url: "{{ api_url }}eventapi/deploy?servicename={{ service_name | urlencode }}"
+      method: GET
+      force_basic_auth: yes
+      validate_certs: no 
+      user: "{{ apiuser }}"
+      password: "{{ apipass }}"
+      headers:
+        Content-Type: "application/json"
+        Cache-Control: "no-cache"
+    register: check_api_status
+
+  - name: Show vars api status
+    debug:
+      var: check_api_status        
+

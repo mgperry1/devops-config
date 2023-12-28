@@ -1,0 +1,97 @@
+---
+- name: Build and deploy SIT API
+  hosts: apidev
+  gather_facts: true
+  gather_subset: '!all'
+  vars_files:
+  - installvars.yml
+  - apidev.yml
+  vars:
+   api_code_repo: 'https://{{GITPAT}}@mygithub.gsk.com/gsk-tech/config-drift.git'
+   api_file_base: "/app/ci-cd/config-drift"
+   install_group: gsk_it
+   install_user: mgp17171
+  tasks:
+  - name: create directory
+    file:
+      mode: 0777
+      path: "{{ api_file_base }}"
+      group: "{{ install_group }}"
+      owner: "{{ install_user }}"
+      state: directory
+    become: true  
+
+  - name: Git checkout
+    environment:
+        TMPDIR: "~/tmp"
+    git:
+      repo: "{{ api_code_repo }}"
+      dest: "{{ api_file_base }}"
+      force: yes
+    register: gitresults
+    ignore_errors: yes
+
+  - name: chmod directory
+    file:
+      mode: u=rwX,g=rwX,o=rwX
+      path: "{{ api_file_base }}"
+      recurse: yes
+
+  - name: parse directory
+    find:
+      path: "{{ api_file_base }}"
+      patterns: '*.sh'
+      recurse: yes
+    register: list_of_files
+
+  - debug:
+      var: item.path
+    with_items: "{{ list_of_files.files }}"
+
+  - name: change permissions
+    file:
+      path: "{{ item.path }}"
+      mode: a+x
+    with_items: "{{ list_of_files.files }}"
+
+  - name: Run shell to build the contianer thru az acr
+    shell: "{{ api_file_base }}/ci-cd/buildacr.sh"
+    args:
+      chdir: "{{ api_file_base }}/ci-cd"
+    register: buildacr  
+
+  - debug:
+      var: buildacr.stdout 
+
+  - name: Run shell to restart the k3s deployment
+    shell: "{{ api_file_base }}/ci-cd/buildk3s.sh"
+    args:
+      chdir: "{{ api_file_base }}/ci-cd"
+    register: buildk3s  
+    become: true
+
+  - debug:
+      var: buildk3s.stdout 
+
+  - name: REST API Check Status
+    uri:
+      url: "{{ api_url }}driftapi/deploy?servicename={{ service_name | urlencode }}"
+      method: GET
+      force_basic_auth: yes
+      validate_certs: no 
+      user: "{{ apiuser }}"
+      password: "{{ apipass }}"
+      headers:
+        Content-Type: "application/json"
+        Cache-Control: "no-cache"
+    register: check_api_status
+
+  - name: Show vars api status
+    debug:
+      var: check_api_status        
+
+  - name: remove directory
+    file:
+      path: "{{ api_file_base }}"
+      state: absent
+    tags: removefiles  

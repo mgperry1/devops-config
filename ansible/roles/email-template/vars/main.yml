@@ -1,0 +1,11 @@
+
+
+email_app_name: "Tower Email Test App"
+email_app_subject: "Alert from GSK Tech - Ansible warning"
+email_app_sender: "no-reply-ansible@gsk.com"
+email_app_recipient: "user@gsk.com"
+email_main_title: "Sample Email Process - Important"
+email_topic1_title: "Title of My first Topic"
+email_topic1_message: "<h3>Message 1</h3>What I would like to say<br> Incude  html tags"
+email_topic2_title: "Title of My Second Topic"
+email_topic2_message: "<h3>Message 2</h3>What I would like to say<br> Incude  html tags"

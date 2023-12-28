@@ -1,0 +1,3 @@
+---
+notification_email_smtp_port: 25
+notification_email_smtp_host: internal-smtp.gsk.com

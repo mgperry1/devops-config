@@ -1,0 +1,89 @@
+---
+- name: Check AWX Service
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+   - "{{ dbvarfile }}"
+   - snowapidev.yml
+  vars:
+   awx_instance: tower.gsk.com
+   api_ver: "v1"
+   service_mail: "mgp17171@gsk.com"
+   SNOW_API: http://10.139.8.200:8097/api/mid/em/inbound_event?Transform=jsonv2
+   SNOW_SOURCE: PCE-OBSERVABILITY
+   SNOW_AUTH: RXZlbnRQb3N0ZXJfZGV2Ok9wZW5kb29yMVNvdXJjZQ==
+   jsonsnowrecords: '{"records" : [{ "source": "{{ SNOW_SOURCE }}" , "event_class": "SCOM 2012 on scom.server.com" , "resource": "AWX:updown", "node": "us6sxlx00020" , "metric_name": "{{ awx_instance }}_down",  "severity": "1", "description": "{{ awx_instance }} is down", "u_evt_custom1": "ReleaseIntegration-L2" }]}'
+
+  tasks:
+
+  - name: Show vars
+    debug:
+      var: jsonsnowrecords  
+    tags: showdebug 
+
+
+  - name: Check Status
+    block: 
+    - name: REST API Check Status
+      uri:
+        url: "https://{{ awx_instance }}/api/v2/ping/"
+        method: GET
+        validate_certs: no 
+        headers:
+          Content-Type: "application/json"
+          Cache-Control: "no-cache"
+      register: check_api
+      ignore_errors: yes
+
+    - name: Show vars
+      debug:
+        var: check_api   
+      tags: showdebug   
+
+    - name: Send SNOW event
+      uri:
+        url: "{{ SNOW_API }}"
+        validate_certs: no  # should be removed after https certs becomes renewed
+        method: POST
+        body_format: json
+        body: "{{ jsonsnowrecords }}"
+        headers:
+          Content-Type: "application/json"
+          Cache-Control: "no-cache"
+          Authorization: "Basic {{ SNOW_AUTH }}"
+      register: check_snow_status
+      when: check_api.status > 201 or check_api.status < 0
+
+    - import_role:
+        name: email-template
+      vars:
+        email_app_name: "AWX/Tower Service Status Check Email"
+        email_app_subject: "Alert from GSK Tech - {{ awx_instance }} Down"
+        email_app_sender: "no-reply-ansible@gsk.com"
+        email_app_recipient: "{{ service_mail }}"
+        email_main_title: "Ping of Serivce API failed - Important"
+        email_topic1_title: "Please verify {{ awx_instance }} is up and working"
+        email_topic1_message: "<h3>Do Not Ignore</h3>If the service is down follow the steps to bring it up<br>"
+        email_topic2_title: "Steps to Bring Up AWX Service"
+        email_topic2_message: "<h3>Process</h3> Link in Confluence" 
+      when: check_api.status > 201 or check_api.status < 0
+
+    - import_role:
+        name: email-template
+      vars:
+        email_app_name: "AWX/Tower Service Status Check Email"
+        email_app_subject: "Alert from GSK Tech - {{ awx_instance }} Up"
+        email_app_sender: "no-reply-ansible@gsk.com"
+        email_app_recipient: "{{ service_mail }}"
+        email_main_title: "Ping of Serivce API Succeded - Important"
+        email_topic1_title: "We verify {{ awx_instance }} is up and working"
+        email_topic1_message: "<h3>Ping of: {{ awx_instance }}/api/v2/ping/ </h3>"
+        email_topic2_title: "JSON Returned"
+        email_topic2_message: "<h3>Response</h3><pre> {{ check_api.json }}</pre>" 
+      when: check_api.status < 201 
+      tags: successemail
+
+    - name: Show vars
+      debug:
+        var: check_snow_status     
+      tags: showdebug  

@@ -1,0 +1,11 @@
+---
+- name: send email based on vars
+  mail:
+    host: "{{ notification_email_smtp_host }}"
+    port: "{{ notification_email_smtp_port }}"
+    from: "{{ email_app_sender }}"
+    to: "{{  email_app_recipient }}"
+    subject: "{{ email_app_subject }}"
+    body: "{{ lookup('template', 'templates/email-topic.j2') }}"
+    subtype: html
+  delegate_to: localhost

@@ -1,0 +1,171 @@
+---
+- name: Run Drift Scan
+  hosts: '{{ host }}'
+  gather_facts: true
+  gather_subset: '!all'
+  strategy: free
+  vars:
+   service_mail: "mgp17171@gsk.com"
+   pkg_name: "openscap-scanner"
+   envfile: "apidev.yml"
+  vars_files:
+     - situploadstoragevars.yml
+     - "{{ envfile }}"
+    
+    #- sitpostgresprod.yml or sitpostgresdev.yml 
+
+  tasks:
+
+  - set_fact:
+     mydate: "{{lookup('pipe','date --iso-8601=seconds|tr -d :')}}" 
+
+  - debug:
+     var: ansible_distribution_version
+
+  - name: get remote file contents
+    command: "cat /etc/redhat-release"
+    register: rhrel
+
+  - name: get remote uptime
+    command: "uptime"
+    register: cmduptime
+
+  - name: get remote uname
+    command: "uname -a"
+    register: cmduname
+
+  - set_fact:
+      myuptime: "{{ cmduptime.stdout }}" 
+      myuname: "{{ cmduname.stdout }}" 
+      myredhatrelease: "{{ rhrel.stdout }}" 
+
+  - debug:
+      msg: "{{ item }}"
+    with_items:
+      - "Uptime :- {{ myuptime }}"
+      - "Uname :- {{ myuname }}"
+      - "RedHat-Release :- {{ myredhatrelease }}"
+    tags: showdebug 
+
+  - name: "Creates scan directory"
+    file:
+      path: "/tmp/{{ pkg_name }}"
+      state: directory
+      mode: 0777
+
+#yum install openscap-scanner scap-security-guide
+  - name: install Openscap
+    yum: 
+         name: |
+            openscap-scanner,
+            scap-security-guide
+         state: present
+    become: true  
+
+  - name: "Execute OpenScan Rel 8 "
+    shell: 
+      cmd: "oscap xccdf eval --fetch-remote-resources --profile xccdf_org.ssgproject.content_profile_cis --results scan_results.xml --report scan_report.html /usr/share/xml/scap/ssg/content/ssg-rhel8-ds.xml"
+      chdir: "/tmp/{{ pkg_name }}"
+    register: shell_result
+    ignore_errors: yes
+    when: '"8." in ansible_distribution_version'   
+    become: true
+    tags: runscan
+
+
+  - name: "Execute OpenScan Rel 7 "
+    shell: 
+      cmd: "oscap xccdf eval --fetch-remote-resources --profile xccdf_org.ssgproject.content_profile_cis --results scan_results.xml --report scan_report.html /usr/share/xml/scap/ssg/content/ssg-rhel7-ds.xml"
+      chdir: "/tmp/{{ pkg_name }}"
+    register: shell_result
+    ignore_errors: yes
+    when: '"7." in ansible_distribution_version'   
+    become: true
+    tags: runscan
+
+  - name: "Execute OpenScan Rel 6 "
+    shell: 
+      cmd: "oscap xccdf eval --fetch-remote-resources --profile xccdf_org.ssgproject.content_profile_nist-cl-il-al --results scan_results.xml --report scan_report.html /usr/share/xml/scap/ssg/content/ssg-rhel6-ds.xml"
+      chdir: "/tmp/{{ pkg_name }}"
+    register: shell_result
+    ignore_errors: yes
+    when: '"6." in ansible_distribution_version'   
+    become: true
+    tags: runscan
+
+  - name: "Update prems"
+    file:
+      path: "/tmp/{{ pkg_name }}/scan_report.html"
+      mode: 0777
+    become: true
+
+  - name: "Update prems"
+    file:
+      path: "/tmp/{{ pkg_name }}/scan_results.xml"
+      mode: 0777
+    become: true
+
+  - set_fact:
+     lower_host: "{{ inventory_hostname | lower}}"
+
+  - name: Upload the output tp Azure Blob
+    script: "scanazupload.sh /tmp/{{ pkg_name }}/scan_report.html {{ lower_host }} text/html"
+    register: upload_output
+    ignore_errors: true  
+
+
+  - name: Upload the output tp Azure Blob
+    script: "scanazupload.sh /tmp/{{ pkg_name }}/scan_results.xml {{ lower_host }}"
+    register: upload_output
+    ignore_errors: true  
+
+  - name: Put process-scan.py file on server
+    copy:
+      src: "process-scan.py"
+      dest: "/tmp/{{ pkg_name }}/"
+      mode: 0755
+
+  - name: Convert CSV to JSON for features
+    command: "python /tmp/{{ pkg_name }}/process-scan.py /tmp/{{ pkg_name }}/scan_results.xml"
+    register: scan_json
+
+  # - name: Convert json file to json Var for Upload
+  #   set_fact:
+  #     output_json: "{{ scan_json.stdout | b64decode | from_json }}"
+  #   ignore_errors: true
+
+  # - debug:
+  #    var: output_json
+  #   ignore_errors: true 
+  #   tags: showdebug 
+ 
+  - debug:
+     var: scan_json.stdout
+    ignore_errors: true 
+    tags: showdebug 
+
+  - name: Send SNOW event
+    uri:
+      url: "{{ api_url }}driftapi/ingestscan/"
+      validate_certs: no  # should be removed after https certs becomes renewed
+      method: POST
+      body_format: json
+      body: "{{ scan_json.stdout }}"
+      user: "{{ apiuser }}"
+      password: "{{ apipass }}"
+      force_basic_auth: yes
+      headers:
+        Content-Type: "application/json"
+        Cache-Control: "no-cache"
+#        Authorization: "Basic {{ SNOW_AUTH }}"
+    register: check_ingest_status
+
+  - debug:
+     var: check_ingest_status
+    tags: showdebug 
+
+  - name: "Creates scan directory"
+    file:
+      path: "/tmp/{{ pkg_name }}"
+      state: absent
+    tags: removefiles
